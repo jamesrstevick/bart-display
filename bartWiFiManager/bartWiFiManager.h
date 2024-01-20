@@ -42,7 +42,7 @@ extern "C" {
 #include "user_interface.h"
 }
 
-const char HTTP_HEAD[] PROGMEM = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><title>{v}</title>";
+const char HTTP_HEADER[] PROGMEM = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/><title>{v}</title>";
 const char HTTP_STYLE[] PROGMEM = "<style>.c{text-align: center;} div,input{padding:5px;font-size:1em;} input{width:95%;} body{text-align: center;font-family:verdana;} button{border:0;border-radius:0.3rem;background-color:#ff7434;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%;} .q{float: right;width: 64px;text-align: right;} .l{background: url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAALVBMVEX///8EBwfBwsLw8PAzNjaCg4NTVVUjJiZDRUUUFxdiZGSho6OSk5Pg4eFydHTCjaf3AAAAZElEQVQ4je2NSw7AIAhEBamKn97/uMXEGBvozkWb9C2Zx4xzWykBhFAeYp9gkLyZE0zIMno9n4g19hmdY39scwqVkOXaxph0ZCXQcqxSpgQpONa59wkRDOL93eAXvimwlbPbwwVAegLS1HGfZAAAAABJRU5ErkJggg==\") no-repeat left center;background-size: 1em;}</style>";
 const char HTTP_SCRIPT[] PROGMEM = "<script>function c(l){document.getElementById('s').value=l.innerText||l.textContent;document.getElementById('p').focus();}</script>";
 const char HTTP_HEAD_END[] PROGMEM = "</head><body><div style='text-align:left;display:inline-block;width:300px;'>";
@@ -56,7 +56,7 @@ const char HTTP_FORM_START[] PROGMEM = "<form action=\"/connect\" method='post'>
 const char HTTP_FORM_PARAM[] PROGMEM = "<br/><input id='{i}' name='{n}' length={l} placeholder='{p}' value='{v}' {c}>";
 const char HTTP_FORM_END[] PROGMEM = "<br/><button type='submit'>Connect to WiFi</button></form>";
 const char HTTP_SCAN_LINK[] PROGMEM = "<br/><div class=\"c\"><a href=\"/wifi\">re-scan available networks</a></div>";
-const char HTTP_SAVED[] PROGMEM = "Clarity Node is now attempting to connect to Clarity Cloud.<br><br>Wait a few seconds and listen to the Node. The following sounds will indicate the connection status:<h3>Connection Successful</h3><b>&lt;2 long beeps&gt;</b><br><br>Clarity Node is successfully connected to Clarity Cloud.<h3>Connection Failed</h3><b>&lt;6 short beeps&gt;</b><br><br>Clarity Node cannot connect to WiFi.<br><br>If the WiFi password was entered incorrectly, please power cycle Clarity Node to re-config WiFi login.<br><br><b>&lt;3 short beeps&gt;</b><br><br>Clarity Node is connected to WiFi but cannot upload data.<br><br>a) Please ensure your Node is registered to Clarity Cloud.<br><br>b) Please check your router and firewall settings.";
+const char HTTP_SAVED[] PROGMEM = "BART Display is connecting to Wi-Fi<br><br>Wait a few seconds and the deice will display Connected.";
 
 const char HTTP_END[] PROGMEM = "</div></body></html>";
 

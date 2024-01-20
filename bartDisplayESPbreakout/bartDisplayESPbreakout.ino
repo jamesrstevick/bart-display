@@ -1,55 +1,32 @@
-//  Copyright 2015-2025 Stevick Projects
 
-/*  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
 
-/*   
- *  Copyright (C) 2024 Stevick Projects
- *  Author: James Stevick
- *  This script runs on the ESP8266 Huzzah Breakout or ESP8266 Huzzah Feather
- *  Board: Adafruit Feather HUZZAH ESP8266
- *  Stack Protection: Enabled
- *  IwIP Variant: v2 Higher Bandwidth (no features)
- *  Must place Breakout into bootloader mode by holding GPIO0 and pressing Reset
- *  Date: 1/10/2024
- */
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+//#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+
+//  QWMH-PE9Y-9WST-DWE9
+//  MW9S-E7SL-26DU-VV8V
+//  ZHJS-P2H8-94GT-DWEI
+
+#include <DNSServer.h>
+#include <bartWiFiManager.h>
 
 
 #include <Arduino.h>
 #include <ArduinoJson.h> 
-
-#include <ESP8266WiFi.h>
-// #include <ESP8266WiFiMulti.h>
-#include <ESP8266HTTPClient.h>
-// #include <ESP8266WebServer.h>
-
-#include <WiFiClient.h>
-//#include <WiFiClientSecure.h>
-#include <WiFiClientSecureBearSSL.h>
-
-#include <DNSServer.h>
-#include <bartWiFiManager.h>
 
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-
-//  QWMH-PE9Y-9WST-DWE9
-//  MW9S-E7SL-26DU-VV8V
-//  ZHJS-P2H8-94GT-DWEI
-
 extern "C" {
 #include "user_interface.h"
 }
 
 #define DEBUG
-//#define WIFI_PROD
 
 #define OLED_RESET -1
 // OLED Screen Settings
@@ -98,7 +75,7 @@ char *url;
 char ap_name[AP_BUF_SIZE] = "BART_DISPLAY_";
 char serial_number[SER_BUF_SIZE] = "00001";
 String selected_station = "";
-//String payload = "";
+String payload = "";
 String station_name[STAT_ARR_SIZE];
 String station_abbr[STAT_ARR_SIZE];
 int numStations = 0;
@@ -117,19 +94,11 @@ bool isNodeIDSet = false;
 bool isURLSet = false;
 bool isWifi = false;
 
-#ifndef WIFI_PROD
-#define STASSID "filthy filb"
-#define STAPSK "yoooooot"
-#endif 
-
-char payload[10289];
 
 void setup()
 {
 
   pinMode(BUTTON,INPUT);
-  
-  Serial.begin(115200);
 
   // Setup Screen
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C); 
@@ -143,7 +112,33 @@ void setup()
   // display.println("BART");
   // display.print("Display");
   // display.display();
-  displayText("BART      Display");
+  displayText("BART     Display");
+  
+  // Setup Wifi
+  system_update_cpu_freq(80);
+  // Disable autoconnect
+  if (WiFi.getAutoConnect())
+  {
+    WiFi.setAutoConnect(false);
+  }
+  
+  // Do not let ESP8266WiFiGenericClass writing to flash to avoid wear.
+  WiFi.persistent(false);
+
+  // start serial communication
+  Serial.begin(115200);
+
+  // Reset saved settings
+  // wifiManager.resetSettings(); // Just use this to reset settings
+  // wifiManager.EEPROMClearCredential(0, true);
+
+  // Disable debug print
+#ifdef DEBUG
+  wifiManager.setDebugOutput(1);
+#else
+  wifiManager.setDebugOutput(0);
+#endif
+
   delay(2000);
   clearDisplay();
   delay(200);
@@ -151,30 +146,6 @@ void setup()
   display.println("Connecting");
   display.print("to Wi-Fi...");
   display.display();
-
-
-#ifdef WIFI_PROD
-  // Setup Wifi
-  system_update_cpu_freq(80);
-  // Disable autoconnect
-  if (WiFi.getAutoConnect())
-  {
-   WiFi.setAutoConnect(false);
-  }
-  
-  // Do not let ESP8266WiFiGenericClass writing to flash to avoid wear.
-  WiFi.persistent(false);
-
-  // Reset saved settings
-  // wifiManager.resetSettings(); // Just use this to reset settings
-  // wifiManager.EEPROMClearCredential(0, true);
-
-   // Disable debug print
-#ifdef DEBUG
-  wifiManager.setDebugOutput(1);
-#else
-  wifiManager.setDebugOutput(0);
-#endif
 
   isWifi = wifiManager.tryConnect();
   if(!isWifi){
@@ -184,31 +155,16 @@ void setup()
     delay(1000);
   }
 
-#else
-  const char* ssid = STASSID;
-  const char* password = STAPSK;
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(STASSID, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-#endif
 
   if (WiFi.status() == WL_CONNECTED) {
-    clearDisplay();
-    delay(100);
-    display.setCursor(0,0);
-    display.println("Connected");
-    display.print(wifiManager._ssid);
-    display.display();
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    delay(1500);
-    clearDisplay();
+      clearDisplay();
+      delay(100);
+      display.setCursor(0,0);
+      display.println("Connected");
+      display.print(wifiManager._ssid);
+      display.display();
+      delay(1500);
+      clearDisplay();
   } 
 
   display.setCursor(0,0);
@@ -217,53 +173,21 @@ void setup()
   display.display();
 
   if (WiFi.status() == WL_CONNECTED) {
-
-    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-    client->setInsecure();
-    HTTPClient https; //Declare an object of class HTTPClient
-//    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9")) {  // XML
-    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9&json=y")) {  // JSON
-      int httpCode = https.GET();                                 
-      Serial.print("httpCode: ");
-      Serial.println(httpCode);
-      if (httpCode > 0) { //Check the returning code
-        WiFiClient *stream = https.getStreamPtr();  
-        int idx = 0;
-        while (stream->available()) {
-          char c = stream->read();
-          payload[idx] = c;
-          idx ++;
-        }
-        Serial.print("Payload Size: ");
-        Serial.println(getSize(payload));   
-        // payload[0] = '\0';
-      }
+      
+    HTTPClient http;  //Declare an object of class HTTPClient
+//    HTTPClient::begin(client,"http://api.bart.gov/api/stn.aspx?cmd=stns&key=MW9S-E7SL-26DU-VV8V&json=y")
+    http.begin(client,"http://api.bart.gov/api/stn.aspx?cmd=stns&json=y&key=ZHJS-P2H8-94GT-DWEI");  //Specify request destination
+    delay(100);
+    int httpCode = http.GET();  //Send the request
+    Serial.print("httpCode: ");
+    Serial.println(httpCode);
+    if (httpCode > 0) { //Check the returning code
+      payload = http.getString();   //Get the request response payload
+      Serial.print("payload: ");
+      Serial.println(payload);
     }
-    https.end();   //Close connection
+    http.end();
   }
-
-//
-//    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-//    client->setInsecure();
-//    HTTPClient https; //Declare an object of class HTTPClient
-////    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9")) {  // XML
-//    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9&json=y")) {  // JSON
-//      int httpCode = https.GET();                                  //Send the request
-//      Serial.print("httpCode: ");
-//      Serial.println(httpCode);
-//      if (httpCode > 0) { //Check the returning code
-//        String payload = "";
-//        WiFiClient *stream = https.getStreamPtr();  
-//        while (stream->available()) {
-//          char c = stream->read();
-//          payload += c;
-//        }
-//        Serial.print("Payload Size: ");
-//        Serial.println(payload.length());   
-//      }
-//    }
-//    https.end();   //Close connection
-//  }
 
 
   // TODO: ensure the stations filled
@@ -272,58 +196,28 @@ void setup()
   JsonArray stations = doc["root"]["stations"]["station"];
   for (JsonObject station : stations) {
 
-//    Serial.println(station["name"].as<char *>());
+    Serial.println(station["name"].as<char *>());
     Serial.println(station["abbr"].as<char *>());
     station_name[numStations] = station["name"].as<char *>();
     station_abbr[numStations] = station["abbr"].as<char *>();
     numStations ++;
   } 
-  Serial.print("Number of Stations: ");
+  Serial.print("Stations: ");
   Serial.println(numStations);
-
-  // Fill stations list
-//  parseStationsXML(payload);
-  // Serial.print("Number of Stations: ");
-  // Serial.println(numStations);
 
   stationSelect();
   delay(2000);
   clearDisplay();
 }
 
-void parseStationsXML(String input_payload){
-  bool searchComplete = false;
-  int searchIndex = 0;
-  while(!searchComplete){
-    Serial.println(searchIndex);
-    if(input_payload.indexOf("<name>",searchIndex)>0){
-      int indexStart = input_payload.indexOf("<name>",searchIndex) + 6;
-      int indexStop = input_payload.indexOf("</name>",indexStart);  
-      String station = input_payload.substring(indexStart, indexStop);
-      Serial.println(station);
-      station_name[numStations] = station;
-      searchIndex = indexStop;
-      numStations ++;
-    } else {
-      searchComplete = true;
-    }
-  }  
-}
-
-int getSize(char arr[]){
-    int i = 0;  
-    for(i; '\0' != arr[i];i++){ 
-    }
-    return i;
-}
-
 void stationSelect(){
   int index = 0;
   bool selected = false;
+  clearDisplay();
   delay(200);
   displayText("Select     Station");
   while(buttonPressed(1000) == 0){
-    delay(1);
+    delay(5);
   }
   clearDisplay();
   delay(200);
@@ -347,16 +241,16 @@ void stationSelect(){
       selected = true;
     }
   }
-  displayText("Station Selected!");
+  displayText("Station    Selected!");
   Serial.println("STATION SELECTED");
 }
 
 void displayText(String text){
   display.setCursor(0,0);
   display.clearDisplay();
-  if( text.length() > 10){
-    display.print(text.substring(0,10));
-    text.remove(0,10);
+  if( text.length() > 11){
+    display.print(text.substring(0,11));
+    text.remove(0,11);
     display.setCursor(0,16);
     display.print(text);
   } else {
@@ -394,31 +288,19 @@ void apMode()
 }
 
 void getPacket(String station){
-  payload[0] = '\0';
 
   if (WiFi.status() == WL_CONNECTED) {
-    
-    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-    client->setInsecure();
-    HTTPClient https; //Declare an object of class HTTPClient
-    if (https.begin(*client, "https://api.bart.gov/api/etd.aspx?cmd=etd&orig="+station+"&key=QWMH-PE9Y-9WST-DWE9&json=y")) {  // JSON
-      int httpCode = https.GET();                                 
-      Serial.print("httpCode: ");
-      Serial.println(httpCode);
-      if (httpCode > 0) { //Check the returning code
-        WiFiClient *stream = https.getStreamPtr();  
-        int idx = 0;
-        while (stream->available()) {
-          char c = stream->read();
-          payload[idx] = c;
-          idx ++;
-        }
-        Serial.print("Payload Size: ");
-        Serial.println(getSize(payload));   
-      }
+      
+    HTTPClient http;  //Declare an object of class HTTPClient
+//    HTTPClient::begin(client, "http://api.bart.gov/api/etd.aspx?cmd=etd&orig=" + station + "&key=MW9S-E7SL-26DU-VV8V&json=y");
+    http.begin(client, "http://api.bart.gov/api/etd.aspx?cmd=etd&orig=" + station + "&key=MW9S-E7SL-26DU-VV8V&json=y");  //Specify request destination
+    int httpCode = http.GET();                                                                  //Send the request
+    if (httpCode > 0) { //Check the returning code
+      payload = http.getString();   //Get the request response payload
     }
-    https.end();   //Close connection
+    http.end();
   }
+
 }
 
 void parseDisplay(String payload){
@@ -505,10 +387,9 @@ void loop()
   Serial.println("START MAIN LOOP");
   getPacket(selected_station);
   parseDisplay(payload);
-//  delay(30000);
 
   // Delay
-  int selection = buttonPressed(30000);
+  int selection = buttonPressed(20000);
 
   // if (!read_command())
   // {

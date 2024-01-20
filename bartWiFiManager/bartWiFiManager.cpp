@@ -567,7 +567,7 @@ void WiFiManager::handleRoot()
     return;
   }
 
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
   page.replace("{v}", "BART Display Configuration");
   // page += FPSTR(HTTP_SCRIPT);
   page += FPSTR(HTTP_STYLE);
@@ -650,7 +650,7 @@ void WiFiManager::handleRoot()
 void WiFiManager::handleWifi(boolean scan)
 {
 
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
   page.replace("{v}", "WiFi Configuration");
   page += FPSTR(HTTP_SCRIPT);
   page += FPSTR(HTTP_STYLE);
@@ -770,7 +770,7 @@ void WiFiManager::handleWifiSave()
     _connect_with_old_pw = false;
   }
 
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
   page.replace("{v}", "WiFi Credentials Saved");
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_HEAD_END);
