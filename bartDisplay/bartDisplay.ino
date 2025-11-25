@@ -19,6 +19,9 @@
  */
 
 
+/****************************************   
+ *  Include Libraries
+****************************************/
 #include <Arduino.h>
 #include <ArduinoJson.h> 
 
@@ -40,6 +43,9 @@
 #include <Adafruit_SSD1306.h>
 
 
+/****************************************   
+ *  Initialize variables
+****************************************/
 //  QWMH-PE9Y-9WST-DWE9
 //  MW9S-E7SL-26DU-VV8V
 //  ZHJS-P2H8-94GT-DWEI
@@ -48,21 +54,22 @@ extern "C" {
 #include "user_interface.h"
 }
 
+// Defining modes
 #define DEBUG
-//#define WIFI_PROD
+#define WIFI_PROD
 
-#define OLED_RESET -1
 // OLED Screen Settings
+#define OLED_RESET -1
 #define SCREEN_HEIGHT 32 
 #define SCREEN_WIDTH  128
 
-#define MAX_WIFI_CONNECT_RETRY 1
-#define MAX_CLOUD_CONNECT_RETRY 1
+// #define MAX_WIFI_CONNECT_RETRY 1
+// #define MAX_CLOUD_CONNECT_RETRY 1
 
-#define HOST_BUF_SIZE 50UL
-#define FURL_BUF_SIZE 128UL
-#define NID_BUF_SIZE 16UL
-#define MES_BUF_SIZE 750UL
+// #define HOST_BUF_SIZE 50UL
+// #define FURL_BUF_SIZE 128UL
+// #define NID_BUF_SIZE 16UL
+// #define MES_BUF_SIZE 750UL
 
 
 #define SER_BUF_SIZE 6UL
@@ -91,13 +98,13 @@ WiFiClient client;
 uint8_t command[6];
 uint16_t datalen = 0;
 
-char host[HOST_BUF_SIZE] = "";
+//char host[HOST_BUF_SIZE] = "";
 char *url;
 
 // BART STUFF
 char ap_name[AP_BUF_SIZE] = "BART_DISPLAY_";
 char serial_number[SER_BUF_SIZE] = "00001";
-String selected_station = "";
+String selected_station = ""; 
 //String payload = "";
 String station_name[STAT_ARR_SIZE];
 String station_abbr[STAT_ARR_SIZE];
@@ -109,9 +116,9 @@ int medPressTime = 1500;
 int longPressTime = 10000;
 #define BUTTON 12
 
-uint8_t buf_url[FURL_BUF_SIZE];
-uint8_t buf_mes[MES_BUF_SIZE];
-uint8_t buf_nid[NID_BUF_SIZE];
+//uint8_t buf_url[FURL_BUF_SIZE];
+//uint8_t buf_mes[MES_BUF_SIZE];
+//uint8_t buf_nid[NID_BUF_SIZE];
 
 bool isNodeIDSet = false;
 bool isURLSet = false;
@@ -120,9 +127,17 @@ bool isWifi = false;
 #ifndef WIFI_PROD
 #define STASSID "filthy filb"
 #define STAPSK "yoooooot"
+//#define STASSID "FlyWithMe"
+//#define STAPSK "tothemoon1636"
 #endif 
 
 char payload[10289];
+
+// State Variables
+uint8_t stateCurrent = 0;
+uint8_t stateSelectStation = 0;
+uint8_t stateDisplay = 1;
+
 
 void setup()
 {
@@ -130,6 +145,8 @@ void setup()
   pinMode(BUTTON,INPUT);
   
   Serial.begin(115200);
+  system_update_cpu_freq(80);
+
 
   // Setup Screen
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C); 
@@ -143,43 +160,40 @@ void setup()
   // display.println("BART");
   // display.print("Display");
   // display.display();
-  displayText("BART      Display");
-  delay(2000);
+  clearDisplay();
+  displayText("BART Display");
+  delay(3000);
   clearDisplay();
   delay(200);
-  display.setCursor(0,0);
-  display.println("Connecting");
-  display.print("to Wi-Fi...");
-  display.display();
-
+  displayText("Connecting to Wi-Fi...");
 
 #ifdef WIFI_PROD
   // Setup Wifi
-  system_update_cpu_freq(80);
-  // Disable autoconnect
-  if (WiFi.getAutoConnect())
-  {
-   WiFi.setAutoConnect(false);
-  }
+  - system_update_cpu_freq(80);
+  //- Disable autoconnect
+  // if (WiFi.getAutoConnect())
+  // {
+  //  WiFi.setAutoConnect(false);
+  // }
   
   // Do not let ESP8266WiFiGenericClass writing to flash to avoid wear.
-  WiFi.persistent(false);
+  //- WiFi.persistent(false);
 
   // Reset saved settings
   // wifiManager.resetSettings(); // Just use this to reset settings
   // wifiManager.EEPROMClearCredential(0, true);
 
-   // Disable debug print
-#ifdef DEBUG
-  wifiManager.setDebugOutput(1);
-#else
-  wifiManager.setDebugOutput(0);
-#endif
+   //- Disable debug print
+// #ifdef DEBUG
+//   wifiManager.setDebugOutput(1);
+// #else
+//   wifiManager.setDebugOutput(0);
+// #endif
 
   isWifi = wifiManager.tryConnect();
   if(!isWifi){
-    wifiManager.resetSettings(); // Just use this to reset settings
-    wifiManager.EEPROMClearCredential(0, true);
+    //- wifiManager.resetSettings(); // Just use this to reset settings
+    //- wifiManager.EEPROMClearCredential(0, true);
     apMode();
     delay(1000);
   }
@@ -211,10 +225,12 @@ void setup()
     clearDisplay();
   } 
 
-  display.setCursor(0,0);
-  display.println("Finding");
-  display.print("Stations...");
-  display.display();
+  clearDisplay();
+  displayText("Finding stations...");
+//  display.setCursor(0,0);
+//  display.println("Finding");
+//  display.print("Stations...");
+//  display.display();
 
   if (WiFi.status() == WL_CONNECTED) {
 
@@ -242,30 +258,6 @@ void setup()
     https.end();   //Close connection
   }
 
-//
-//    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure);
-//    client->setInsecure();
-//    HTTPClient https; //Declare an object of class HTTPClient
-////    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9")) {  // XML
-//    if (https.begin(*client, "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9&json=y")) {  // JSON
-//      int httpCode = https.GET();                                  //Send the request
-//      Serial.print("httpCode: ");
-//      Serial.println(httpCode);
-//      if (httpCode > 0) { //Check the returning code
-//        String payload = "";
-//        WiFiClient *stream = https.getStreamPtr();  
-//        while (stream->available()) {
-//          char c = stream->read();
-//          payload += c;
-//        }
-//        Serial.print("Payload Size: ");
-//        Serial.println(payload.length());   
-//      }
-//    }
-//    https.end();   //Close connection
-//  }
-
-
   // TODO: ensure the stations filled
   DynamicJsonDocument doc(JSON_DOC_SIZE);
   deserializeJson(doc, payload);
@@ -285,10 +277,6 @@ void setup()
 //  parseStationsXML(payload);
   // Serial.print("Number of Stations: ");
   // Serial.println(numStations);
-
-  stationSelect();
-  delay(2000);
-  clearDisplay();
 }
 
 void parseStationsXML(String input_payload){
@@ -321,7 +309,7 @@ void stationSelect(){
   int index = 0;
   bool selected = false;
   delay(200);
-  displayText("Select     Station");
+  displayText("Select Station");
   while(buttonPressed(1000) == 0){
     delay(1);
   }
@@ -351,9 +339,62 @@ void stationSelect(){
   Serial.println("STATION SELECTED");
 }
 
-void displayText(String text){
-  display.setCursor(0,0);
+void displayText2(String fullText){
+
+  fullText += " ";
+  String printLine = "";
+  bool firstLine = true;
+  bool notComplete = true;
+  int startIndex = 0;
+  int spaceIndex = 0;
+  String oneWord = "";
   display.clearDisplay();
+
+
+  while (notComplete){
+    spaceIndex = fullText.indexOf(" ",startIndex);
+    oneWord = fullText.substring(startIndex,spaceIndex);
+  
+    if (firstLine){
+      if ((printLine.length() + oneWord.length()) > 10) {
+        if (printLine.length() == 0){
+          printLine += oneWord.substring(0,10);
+          firstLine = false;
+        } else{
+          while (printLine.length() < 10){
+            printLine += " ";
+          }
+          printLine += oneWord;
+          notComplete = false;
+          break;
+        }
+      } else {  
+        printLine += oneWord;
+        if (printLine.length()!=10){
+          printLine += " ";
+        }
+      }
+    } else {
+      printLine += oneWord;
+      printLine += " ";
+    }
+
+    startIndex = spaceIndex + 1;
+    if (spaceIndex == fullText.length()){
+      notComplete = false;
+    }
+  }
+
+  display.print(printLine);
+  display.display();
+  
+}
+
+  
+void displayText(String text){
+
+  clearDisplay();
+ 
   if( text.length() > 10){
     display.print(text.substring(0,10));
     text.remove(0,10);
@@ -365,9 +406,87 @@ void displayText(String text){
   display.display();
 }
 
+void displayText2(String text, int startLine){
+
+ 
+  String printLine = "";
+  String subSection = "";
+//  int textLength = 0;
+  int startIndex = 0;
+  while(true){ 
+    Serial.println(printLine);
+    int spaceIndex = text.indexOf(" ",startIndex);
+    if (spaceIndex == -1){
+      subSection = text.substring(startIndex);
+    } else {
+      subSection = text.substring(startIndex,spaceIndex);
+    }
+    if (subSection.length() == 0){
+      break;
+    }
+    if (((printLine + subSection).length() + 1) <= 10){
+      printLine += subSection;
+      printLine += " ";
+      startIndex += printLine.length();
+      continue;
+    } else {
+      if (printLine.length()==0){
+        printLine += subSection;
+        printLine += " ";
+      }
+      startIndex += printLine.length();
+      break;
+    }
+  }
+  Serial.println(startIndex);
+
+  if ((startLine == 1) || (startLine == 3)) {
+    display.setCursor(0,0);
+  } else if (startLine == 2) {
+    display.setCursor(0,16);
+  }
+
+  display.print(printLine.substring(0,10));
+
+  if (startLine == 3){
+    printLine = "";
+    while(true){ 
+    Serial.println(printLine);
+      int spaceIndex = text.indexOf(" ",startIndex);
+      if (spaceIndex == -1){
+        subSection = text.substring(startIndex);
+      } else {
+        subSection = text.substring(startIndex,spaceIndex);
+      }
+      if (subSection.length() == 0){
+        break;
+      }
+      if (((printLine + subSection).length() + 1) <= 10){
+        printLine += subSection;
+        printLine += " ";
+        startIndex += printLine.length();
+        continue;
+      } else {
+        if (printLine.length()==0){
+          printLine += subSection;
+          printLine += " ";
+        }
+        startIndex += printLine.length();
+        break;
+      }
+    }
+    display.setCursor(0,16);
+    display.print(printLine);
+  }
+
+  Serial.println(startIndex);
+  display.display();
+}
+
 void clearDisplay(){
   display.clearDisplay();
   display.display();
+  display.setCursor(0,0);
 }
 
 void apMode()
@@ -448,9 +567,9 @@ void parseDisplay(String payload){
         display.print(" minutes");
         display.display();
         
-        delay(2000);
+        delay(3000);
         clearDisplay();
-        delay(200);
+        delay(500);
 
       }
     }
@@ -463,6 +582,9 @@ void parseDisplay(String payload){
 // 2 - short press ~2 sec
 // 3 - long press ~10 sec
 int buttonPressed(unsigned long timeMillis){
+  while (digitalRead(BUTTON)){
+    delay(5);
+  }
   bool isButton = false;
   unsigned long t0 = millis();
   while((millis() - t0) <= timeMillis){
@@ -486,6 +608,7 @@ int buttonPressed(unsigned long timeMillis){
             //     return 3;
             //   }
             // }
+            
             return 2;
           }   
         }       
@@ -503,68 +626,19 @@ void loop()
 {
 
   Serial.println("START MAIN LOOP");
-  getPacket(selected_station);
-  parseDisplay(payload);
-//  delay(30000);
 
-  // Delay
-  int selection = buttonPressed(30000);
-
-  // if (!read_command())
-  // {
-  //   return;
-  // }
-
-  // if (cmpcmd("URL"))
-  // {
-  //   if (handle_url())
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  // }
-  // else if (cmpcmd("NID"))
-  // {
-  //   if (handle_nid())
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  // }
-  // else if (cmpcmd("STA"))
-  // {
-  //   if (WiFi.status() == WL_CONNECTED)
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  //   else
-  //   {
-  //     Serial.print("\r\nE01\r\n");
-  //   }
-  // }
-  // else if (cmpcmd("CON"))
-  // {
-  //   if (wifiManager.tryConnect())
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  //   else
-  //   {
-  //     Serial.print("\r\nE01\r\n");
-  //   }
-  // }
-  // else if (cmpcmd("GET"))
-  // {
-  //   if (handle_get())
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  // }
-  // else if (cmpcmd("POS"))
-  // {
-  //   if (handle_pos())
-  //   {
-  //     Serial.print("\r\nOKK\r\n");
-  //   }
-  // }
+  if (stateCurrent == stateSelectStation){
+    stationSelect();
+    delay(2000);
+    clearDisplay();
+    stateCurrent = stateDisplay;
+  } else if (stateCurrent == stateDisplay){
+    getPacket(selected_station);
+    parseDisplay(payload);
+    if (buttonPressed(30000) == 2){
+      stateCurrent = stateSelectStation;
+    }
+  }
 }
 
 
