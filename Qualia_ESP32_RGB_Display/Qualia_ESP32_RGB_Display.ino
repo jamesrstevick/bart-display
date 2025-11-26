@@ -24,6 +24,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "Qualia_ESP32_RGB_Display.h"
 // #include <Fonts/FreeMono9pt7b.h> // TODO comment
 // #include <Fonts/FreeSans9pt7b.h> // TODO comment
 
@@ -75,33 +76,24 @@ Arduino_RGB_Display *gfx = new Arduino_RGB_Display
 // const char* password = "tothemoon1636"; // Change this to your WiFi password
 // const char* ssid     = "BEARmesh"; // Change this to your WiFi SSID
 // const char* password = "kj#975mm"; // Change this to your WiFi password
-// const char* ssid     = "CoralCove88_Mesh"; // Change this to your WiFi SSID
-// const char* password = "CoralCove88"; // Change this to your WiFi password
-const char* ssid     = "James Stevick's iPhone"; // Change this to your WiFi SSID
-const char* password = "stevick5"; // Change this to
+const char* ssid     = "CoralCove88_Mesh"; // Change this to your WiFi SSID
+const char* password = "CoralCove88"; // Change this to your WiFi password
+// const char* ssid     = "James Stevick's iPhone"; // Change this to your WiFi SSID
+// const char* password = "stevick5"; // Change this to
 
-const char* serverName = "https://api.bart.gov/api/stn.aspx?cmd=stns&key=QWMH-PE9Y-9WST-DWE9&json=y";
+const char* serverName = BART_API_STATIONS_URL;
 
-#define STAT_ARR_SIZE 55UL
-#define JSON_DOC_SIZE 20480UL
 String station_name[STAT_ARR_SIZE];
 String station_abbr[STAT_ARR_SIZE];
 int numStations = 0;
-String selected_station = ""; 
+String selected_station = "";
+String selected_station_name = ""; 
 // char payload[10289];
 
-#define SMALL_TXT 7
-#define LARGE_TXT 8
-// #define SMALL_TXT 4
-// #define LARGE_TXT 5
-
-
-// Button stuff
-#define UP_BUTTON 5 
-#define DN_BUTTON 6 
-int buttonDebounceDelay = 20;
-int medPressTime = 1500;
-int longPressTime = 10000;
+// Button timing variables
+int buttonDebounceDelay = BUTTON_DEBOUNCE_DELAY;
+int medPressTime = MED_PRESS_TIME;
+int longPressTime = LONG_PRESS_TIME;
 
 
 
@@ -122,45 +114,95 @@ uint8_t tsa, tsb, tsc, ds;
 
 
 
+// Calculate X position to center text horizontally
+// Returns X coordinate for setCursor to center the text
+// Text size must be set before calling this function
+int16_t getCenteredX(const String& text, uint8_t textSize) {
+  // Get actual display width (in case rotation changed it)
+  int16_t actualWidth = gfx->width();
+  
+  // Calculate text width: each character is CHAR_WIDTH * textSize pixels wide
+  // For monospace fonts, this is accurate
+  int16_t textWidth = text.length() * CHAR_WIDTH * textSize;
+  
+  // Calculate centered X position
+  int16_t x = (actualWidth - textWidth) / 2;
+  
+  // Ensure we stay within margins
+  if(x < DISPLAY_MARGIN) {
+    x = DISPLAY_MARGIN;
+  }
+  // Check if text would overflow on the right
+  int16_t maxX = actualWidth - textWidth - DISPLAY_MARGIN;
+  if(x > maxX && maxX >= DISPLAY_MARGIN) {
+    x = maxX;
+  }
+  
+  return x;
+}
+
 // Check for button press for certain amount of time in milliseconds
-// 0 - no press
-// 1 - momentary press 
-// 2 - short press ~2 sec
-// 3 - long press ~10 sec
+// Returns: 0 = no press, 1 = UP short press, 2 = UP medium press (1.5s), 
+//          -1 = DOWN short press, -2 = DOWN medium press (1.5s)
+// Note: Long press (10s) reserved for future features
 int buttonPressed(unsigned long timeMillis){
-  while (!expander->digitalRead(UP_BUTTON)){
+  // Wait for both buttons to be released first
+  while (!expander->digitalRead(UP_BUTTON) || !expander->digitalRead(DN_BUTTON)){
     delay(5);
   }
-  bool isButton = false;
+  
   unsigned long t0 = millis();
+  
   while((millis() - t0) <= timeMillis){
-    isButton = !expander->digitalRead(UP_BUTTON);
-    if(isButton == true){
+    bool isUpButton = !expander->digitalRead(UP_BUTTON);
+    bool isDownButton = !expander->digitalRead(DN_BUTTON);
+    
+    // Check UP button first
+    if(isUpButton){
       delay(buttonDebounceDelay);
-      isButton = !expander->digitalRead(UP_BUTTON);
-      if(isButton == true){
-        for(int i=1; i<=round(medPressTime/100); i++){
+      isUpButton = !expander->digitalRead(UP_BUTTON);
+      if(isUpButton){
+        // Check for medium press - wait and see if button stays pressed
+        // Use MED_PRESS_TIME (1250ms) for medium press (station selection)
+        // LONG_PRESS_TIME (10000ms) reserved for future features
+        int iterations = round(medPressTime / 100);
+        
+        for(int i = 0; i < iterations; i++){
           delay(100);
-          isButton = !expander->digitalRead(UP_BUTTON);
-          if(isButton == false){
-            break; 
-          } else if (i==round(medPressTime/100)){
-            // for(int i=round(medPressTime/100); i<=round(longPressTime/100); i++){
-            //   delay(100);
-            //   isButton = !expander->digitalRead(UP_BUTTON);
-            //   if(isButton == false){
-            //     break; 
-            //   } else if (i==round(longPressTime/100)){
-            //     return 3;
-            //   }
-            // }
-            
-            return 2;
-          }   
-        }       
-        return 1;
+          isUpButton = !expander->digitalRead(UP_BUTTON);
+          if(!isUpButton){
+            // Button released before medium press time
+            return 1; // Short press UP
+          }
+        }
+        // If we get here, button was held for the full medium press time
+        return 2; // Medium press UP (station selection)
       }
     }
+    
+    // Check DOWN button
+    if(isDownButton){
+      delay(buttonDebounceDelay);
+      isDownButton = !expander->digitalRead(DN_BUTTON);
+      if(isDownButton){
+        // Check for medium press - wait and see if button stays pressed
+        // Use MED_PRESS_TIME (1250ms) for medium press (station selection)
+        // LONG_PRESS_TIME (10000ms) reserved for future features
+        int iterations = round(medPressTime / 100);
+        
+        for(int i = 0; i < iterations; i++){
+          delay(100);
+          isDownButton = !expander->digitalRead(DN_BUTTON);
+          if(!isDownButton){
+            // Button released before medium press time
+            return -1; // Short press DOWN
+          }
+        }
+        // If we get here, button was held for the full medium press time
+        return -2; // Medium press DOWN (station selection)
+      }
+    }
+    
     delay(5);
   }
   return 0;
@@ -189,61 +231,333 @@ void clearDisplay(){
   gfx->fillScreen(BLACK);
 }
 
+// Display station name, handling "/" splitting into two lines if needed
+// Centers text both horizontally and vertically
+void displayStationName(const String& stationName, uint8_t textSize) {
+  int16_t actualWidth = gfx->width();
+  int16_t actualHeight = gfx->height();
+  int16_t charHeight = CHAR_HEIGHT * textSize;
+  
+  // Check if name contains "/" (not at start or end)
+  int slashIndex = stationName.indexOf('/');
+  
+  if(slashIndex > 0 && slashIndex < stationName.length() - 1) {
+    // Split into two lines
+    String line1 = stationName.substring(0, slashIndex);
+    String line2 = stationName.substring(slashIndex + 1);
+    line1.trim();
+    line2.trim();
+    
+    // Only split if both parts have content
+    if(line1.length() > 0 && line2.length() > 0) {
+      // Calculate Y positions to center the two-line block vertically
+      int16_t lineSpacing = charHeight / 2; // Space between lines
+      int16_t totalHeight = (charHeight * 2) + lineSpacing;
+      int16_t y1 = (actualHeight / 2) - (totalHeight / 2);
+      int16_t y2 = y1 + charHeight + lineSpacing;
+      
+      // Display first line (centered)
+      int16_t x1 = getCenteredX(line1, textSize);
+      gfx->setCursor(x1, y1);
+      gfx->print(line1);
+      
+      // Display second line (centered)
+      int16_t x2 = getCenteredX(line2, textSize);
+      gfx->setCursor(x2, y2);
+      gfx->print(line2);
+      
+      Serial.print(F("TWO-LINE DISPLAY - LINE1: \""));
+      Serial.print(line1);
+      Serial.print(F("\" at (")); Serial.print(x1); Serial.print(F(",")); Serial.print(y1);
+      Serial.print(F("), LINE2: \""));
+      Serial.print(line2);
+      Serial.print(F("\" at (")); Serial.print(x2); Serial.print(F(",")); Serial.print(y2);
+      Serial.println(F(")"));
+      return;
+    }
+  }
+  
+  // Single line - center horizontally and vertically
+  int16_t x = getCenteredX(stationName, textSize);
+  int16_t y = (actualHeight / 2) - (charHeight / 2);
+  gfx->setCursor(x, y);
+  gfx->print(stationName);
+  
+  Serial.print(F("SINGLE-LINE DISPLAY: \""));
+  Serial.print(stationName);
+  Serial.print(F("\" at (")); Serial.print(x); Serial.print(F(",")); Serial.print(y);
+  Serial.print(F("), DISPLAY SIZE: "));
+  Serial.print(actualWidth);
+  Serial.print(F("x"));
+  Serial.print(actualHeight);
+  Serial.println(F(")"));
+}
+
+// Display arriving train screen
+// Shows destination (size 8) and "X CAR TRAIN ARRIVING" (size 5)
+// Both centered horizontally and vertically
+void displayArrivingTrain(const String& destination, uint8_t carLength) {
+  clearDisplay();
+  gfx->setRotation(DISPLAY_ROTATION);
+  gfx->setTextColor(RED, BLACK);
+  
+  int16_t actualWidth = gfx->width();
+  int16_t actualHeight = gfx->height();
+  
+  // Display destination (size 8)
+  String destDisplay = destination;
+  destDisplay.toUpperCase();
+  gfx->setTextSize(ARRIVING_STATION_TXT);
+  int16_t destTextHeight = CHAR_HEIGHT * ARRIVING_STATION_TXT;
+  int16_t destX = getCenteredX(destDisplay, ARRIVING_STATION_TXT);
+  
+  // Display car train arriving (size 5)
+  String carText = String(carLength) + F(STR_CAR_TRAIN) + F(STR_ARRIVING);
+  gfx->setTextSize(ARRIVING_CAR_TXT);
+  int16_t carTextHeight = CHAR_HEIGHT * ARRIVING_CAR_TXT;
+  int16_t carX = getCenteredX(carText, ARRIVING_CAR_TXT);
+  
+  // Calculate spacing and center vertically
+  int16_t lineSpacing = 20;  // Space between destination and car text
+  int16_t totalHeight = destTextHeight + lineSpacing + carTextHeight;
+  int16_t destY = (actualHeight / 2) - (totalHeight / 2);
+  int16_t carY = destY + destTextHeight + lineSpacing;
+  
+  // Display destination
+  gfx->setTextSize(ARRIVING_STATION_TXT);
+  gfx->setCursor(destX, destY);
+  gfx->print(destDisplay);
+  
+  // Display car train arriving
+  gfx->setTextSize(ARRIVING_CAR_TXT);
+  gfx->setCursor(carX, carY);
+  gfx->print(carText);
+  
+  Serial.print(F("ARRIVING TRAIN - DESTINATION: \""));
+  Serial.print(destDisplay);
+  Serial.print(F("\" at (")); Serial.print(destX); Serial.print(F(",")); Serial.print(destY);
+  Serial.print(F("), CAR TEXT: \""));
+  Serial.print(carText);
+  Serial.print(F("\" at (")); Serial.print(carX); Serial.print(F(",")); Serial.print(carY);
+  Serial.println(F(")"));
+}
+
 
 void stationSelect(){
+  Serial.println(F("=== STATION SELECT START ==="));
+  Serial.print(F("NUM STATIONS AVAILABLE: "));
+  Serial.println(numStations);
+  
   int index = 0;
   bool selected = false;
   delay(100);
   clearDisplay();
-  gfx->setCursor(12, 132);
-  // gfx->setCursor(12, 191);
-  gfx->setTextSize(SMALL_TXT); 
-  gfx->print(F("SELECT STATION"));
+  
+  // Ensure display settings
+  gfx->setRotation(DISPLAY_ROTATION);
+  gfx->setTextColor(RED, BLACK);
+  
+  // Ensure horizontal orientation
+  gfx->setRotation(DISPLAY_ROTATION);
+  gfx->setTextColor(RED, BLACK);
+  
+  // Display "SELECT STATION" centered horizontally, near top
+  gfx->setTextSize(SMALL_TXT);
+  String selectText = String(STR_SELECT_STATION);
+  int16_t x1 = getCenteredX(selectText, SMALL_TXT);
+  int16_t y1 = DISPLAY_MARGIN + (CHAR_HEIGHT * SMALL_TXT);
+  Serial.print(F("SELECT STATION COORDS - X: "));
+  Serial.print(x1);
+  Serial.print(F(", Y: "));
+  Serial.println(y1);
+  gfx->setCursor(x1, y1);
+  gfx->print(F(STR_SELECT_STATION));
+  
+  // Display "PRESS UP OR DOWN TO SELECT" centered below
+  gfx->setTextSize(INSTRUCTION_TXT);
+  String instructionText = String(STR_PRESS_UP_OR_DOWN);
+  int16_t x2 = getCenteredX(instructionText, INSTRUCTION_TXT);
+  int16_t y2 = y1 + (CHAR_HEIGHT * SMALL_TXT) + DISPLAY_MARGIN;
+  Serial.print(F("INSTRUCTION COORDS - X: "));
+  Serial.print(x2);
+  Serial.print(F(", Y: "));
+  Serial.println(y2);
+  gfx->setCursor(x2, y2);
+  gfx->print(F(STR_PRESS_UP_OR_DOWN));
 
-  while(buttonPressed(1000) == 0){
-    delay(1);
+  Serial.println(F("WAITING FOR BUTTON PRESS TO CONTINUE..."));
+  // Wait for UP or DOWN button to continue
+  int buttonPress = 0;
+  while(buttonPress == 0){
+    buttonPress = buttonPressed(1000);
+    delay(10);
   }
+  Serial.print(F("BUTTON PRESSED: "));
+  Serial.println(buttonPress);
 
+  // Now show station selection - display first station immediately
   clearDisplay();
   delay(200);
-  gfx->setCursor(12, 132);
-  // gfx->setCursor(12, 191);
-  gfx->print(station_name[index]);
-
+  
+  // Ensure index is valid
+  if(index >= numStations){
+    Serial.println(F("WARNING: INDEX >= NUM STATIONS, RESETTING TO 0"));
+    index = 0;
+  }
+  if(index < 0){
+    Serial.println(F("WARNING: INDEX < 0, RESETTING TO 0"));
+    index = 0;
+  }
+  
+  if(numStations == 0) {
+    Serial.println(F("ERROR: NO STATIONS AVAILABLE!"));
+    gfx->setTextSize(SMALL_TXT);
+    gfx->setCursor(DISPLAY_MARGIN, DISPLAY_HEIGHT / 2);
+    gfx->print(F("NO STATIONS LOADED"));
+    delay(5000);
+    return;
+  }
+  
+  Serial.println(F("ENTERING STATION SELECTION LOOP"));
   while(!selected){
-    if(index == numStations){
+    // Wrap around
+    if(index >= numStations){
+      Serial.println(F("WRAPPING: INDEX >= NUM STATIONS"));
       index = 0;
     }
-    int buttonType = buttonPressed(60000);
-    if (buttonType==0){
-      continue;
-    } else if (buttonType==1){
+    if(index < 0){
+      Serial.println(F("WRAPPING: INDEX < 0"));
+      index = numStations - 1;
+    }
+    
+    Serial.print(F("DISPLAYING STATION "));
+    Serial.print(index);
+    Serial.print(F(": "));
+    Serial.println(station_name[index]);
+    
+    // Display current station centered
+    String station = station_name[index];
+    station.toUpperCase();
+    
+    // Ensure display settings are correct for horizontal orientation
+    gfx->setRotation(DISPLAY_ROTATION);
+    gfx->setTextColor(RED, BLACK);
+    gfx->setTextSize(STATION_NAME_TXT);
+    
+    // Use the new display function that handles "/" splitting
+    displayStationName(station, STATION_NAME_TXT);
+    
+    // Force display update if needed
+    #ifdef CANVAS
+    gfx->flush();
+    #endif
+    
+    // Wait for button press
+    Serial.println(F("WAITING FOR BUTTON PRESS..."));
+    buttonPress = buttonPressed(60000);
+    Serial.print(F("BUTTON PRESS: "));
+    Serial.println(buttonPress);
+    
+    if(buttonPress == 1){
+      // UP short press - scroll forward
+      Serial.println(F("SCROLLING FORWARD"));
       index++;
       clearDisplay();
-      gfx->setCursor(12, 132);
-      // gfx->setCursor(12, 191);
       delay(200);
-      String station = station_name[index];
-      station.toUpperCase();
-      gfx->print(station);
-    } else if (buttonType==2){
-      selected_station = station_abbr[index];
+    } else if(buttonPress == -1){
+      // DOWN short press - scroll backward
+      Serial.println(F("SCROLLING BACKWARD"));
+      index--;
       clearDisplay();
-      gfx->setCursor(12, 12);
-      // gfx->setCursor(12, 191);
-      gfx->println(F("STATION SELECTED:"));
-      gfx->print(selected_station);
+      delay(200);
+    } else if(buttonPress == 2 || buttonPress == -2){
+      // Medium press (1.25s) on either button - select station
+      Serial.print(F("STATION SELECTED: "));
+      Serial.println(station_abbr[index]);
+      selected_station = station_abbr[index];
+      selected_station_name = station_name[index];
       selected = true;
     }
+    // If buttonPress == 0 (timeout), loop continues and re-displays the same station
   }
+  
+  Serial.println(F("=== STATION SELECT COMPLETE ==="));
 
+  // Show confirmation with station name
   delay(1000);
   clearDisplay();
-  gfx->setCursor(12, 132);
-  // gfx->setCursor(12, 191);
-  gfx->print(F("STATION SELECTED!"));
-  Serial.println("STATION SELECTED");
-  delay(5000);
+  gfx->setRotation(DISPLAY_ROTATION);
+  gfx->setTextColor(RED, BLACK);
+  
+  int16_t actualWidth = gfx->width();
+  int16_t actualHeight = gfx->height();
+  
+  // Display "STATION SELECTED!" centered
+  String confirmText = String(STR_STATION_SELECTED_CONFIRM);
+  gfx->setTextSize(STATION_NAME_TXT);
+  int16_t confirmTextHeight = CHAR_HEIGHT * STATION_NAME_TXT;
+  int16_t confirmX = getCenteredX(confirmText, STATION_NAME_TXT);
+  
+  // Prepare station name (handle "/" splitting if needed)
+  String stationDisplayName = selected_station_name;
+  stationDisplayName.toUpperCase();
+  int16_t stationTextHeight = CHAR_HEIGHT * STATION_NAME_TXT;
+  
+  // Check if station name contains "/" for splitting
+  int slashIndex = stationDisplayName.indexOf('/');
+  bool hasSlash = (slashIndex > 0 && slashIndex < stationDisplayName.length() - 1);
+  
+  int16_t lineSpacing = 15;  // Space between confirmation and station name
+  int16_t stationBlockHeight;
+  
+  if(hasSlash) {
+    // Station name will be split into two lines
+    stationBlockHeight = (stationTextHeight * 2) + (stationTextHeight / 2);
+  } else {
+    // Single line station name
+    stationBlockHeight = stationTextHeight;
+  }
+  
+  // Calculate total height and center vertically
+  int16_t totalHeight = confirmTextHeight + lineSpacing + stationBlockHeight;
+  int16_t confirmY = (actualHeight / 2) - (totalHeight / 2);
+  
+  // Display "STATION SELECTED!"
+  gfx->setCursor(confirmX, confirmY);
+  gfx->print(confirmText);
+  
+  // Display station name (handle "/" splitting)
+  if(hasSlash) {
+    String line1 = stationDisplayName.substring(0, slashIndex);
+    String line2 = stationDisplayName.substring(slashIndex + 1);
+    line1.trim();
+    line2.trim();
+    
+    if(line1.length() > 0 && line2.length() > 0) {
+      int16_t stationLineSpacing = stationTextHeight / 2;
+      int16_t stationY1 = confirmY + confirmTextHeight + lineSpacing;
+      int16_t stationY2 = stationY1 + stationTextHeight + stationLineSpacing;
+      
+      int16_t stationX1 = getCenteredX(line1, STATION_NAME_TXT);
+      int16_t stationX2 = getCenteredX(line2, STATION_NAME_TXT);
+      
+      gfx->setCursor(stationX1, stationY1);
+      gfx->print(line1);
+      gfx->setCursor(stationX2, stationY2);
+      gfx->print(line2);
+    }
+  } else {
+    // Single line station name
+    int16_t stationX = getCenteredX(stationDisplayName, STATION_NAME_TXT);
+    int16_t stationY = confirmY + confirmTextHeight + lineSpacing;
+    gfx->setCursor(stationX, stationY);
+    gfx->print(stationDisplayName);
+  }
+  
+  Serial.println(SERIAL_MSG_STATION_SELECTED);
+  Serial.print(F("SELECTED STATION NAME: "));
+  Serial.println(selected_station_name);
+  delay(2500);  // Half of original 5000ms delay
 }
 
 
@@ -280,7 +594,7 @@ void setup()
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    Serial.print(F("."));
   }
   // Serial.println("WiFi connected");
   // Serial.println("IP address: ");
@@ -296,7 +610,7 @@ void setup()
   if (!gfx->begin())
   // if (!gfx->begin(80000000)) /* specify data bus speed */
   {
-    Serial.println("gfx->begin() failed!");
+    Serial.println(F("GFX->BEGIN() FAILED!"));
   }
 
   // gfx->setRotation(0); // Rotate to be landscape
@@ -321,7 +635,16 @@ void setup()
   ds = (w <= 160) ? 9 : 12;                                                    // digit size
 
   clearDisplay();
-  gfx->setRotation(3);
+  gfx->setRotation(DISPLAY_ROTATION);
+  
+  // Debug: Print actual display dimensions after rotation
+  Serial.print(F("DISPLAY DIMENSIONS AFTER ROTATION - WIDTH: "));
+  Serial.print(gfx->width());
+  Serial.print(F(", HEIGHT: "));
+  Serial.println(gfx->height());
+  Serial.print(F("EXPECTED (HORIZONTAL): 960x320"));
+  Serial.println();
+  
   gfx->setCursor(0, 0);
   gfx->setTextColor(RED, BLACK);
   gfx->setTextSize(1);
@@ -356,173 +679,622 @@ void loop(void)
 
   delay(1000);
 
+  Serial.println(F("=== LOOP START ==="));
+  Serial.print(F("WIFI STATUS: "));
+  Serial.println(WiFi.status());
+  
   if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(F("WIFI CONNECTED"));
+    Serial.print(F("ATTEMPTING TO FETCH STATIONS FROM: "));
+    Serial.println(serverName);
+    
     HTTPClient http;
     http.begin(serverName);
-    // http.setInsecure();
+    http.setTimeout(10000); // 10 second timeout
+    // http.setInsecure(); // Uncomment if SSL issues
+    
+    Serial.println(F("SENDING HTTP GET REQUEST..."));
     int httpCode = http.GET();
+    Serial.print(F("HTTP RESPONSE CODE: "));
+    Serial.println(httpCode);
 
     if (httpCode > 0) {
+      Serial.println(F("HTTP REQUEST SUCCESSFUL"));
       String payload = http.getString();
-      // Serial.println("HTTP Response code: " + String(httpCode));
-      // Serial.println("Received JSON:");
-      // Serial.println(payload);
+      Serial.print(F("PAYLOAD LENGTH: "));
+      Serial.println(payload.length());
+      Serial.println(F("PAYLOAD PREVIEW (first 200 chars):"));
+      Serial.println(payload.substring(0, 200));
 
+      // Reset station count
+      numStations = 0;
+      
       // Parse JSON
       DynamicJsonDocument doc(JSON_DOC_SIZE);
       DeserializationError error = deserializeJson(doc, payload);
 
       if (!error) {
+        Serial.println(F("JSON PARSING SUCCESSFUL"));
         JsonArray stations = doc["root"]["stations"]["station"];
+        Serial.print(F("NUMBER OF STATIONS IN JSON: "));
+        Serial.println(stations.size());
+        
         for (JsonObject station : stations) {
-      
-          // Serial.println(station["name"].as<char *>());
-          // Serial.println(station["abbr"].as<char *>());
-          station_name[numStations] = station["name"].as<char *>();
-          station_abbr[numStations] = station["abbr"].as<char *>();
-          numStations ++;
+          if(numStations < STAT_ARR_SIZE) {
+            String name = station["name"].as<String>();
+            // Replace "San Francisco International Airport" with "SFO Airport"
+            if(name == "San Francisco International Airport") {
+              name = "SFO Airport";
+              Serial.print(F("REPLACED STATION NAME: \"San Francisco International Airport\" -> \"SFO Airport\""));
+              Serial.println();
+            }
+            station_name[numStations] = name;
+            station_abbr[numStations] = station["abbr"].as<String>();
+            Serial.print(F("STATION "));
+            Serial.print(numStations);
+            Serial.print(F(": "));
+            Serial.print(station_name[numStations]);
+            Serial.print(F(" ("));
+            Serial.print(station_abbr[numStations]);
+            Serial.println(F(")"));
+            numStations++;
+          } else {
+            Serial.println(F("WARNING: STATION ARRAY FULL!"));
+            break;
+          }
         } 
-        Serial.print("Stations: ");
+        Serial.print(SERIAL_MSG_STATIONS);
         Serial.println(numStations);
       } else {
-        Serial.print("deserializeJson() failed: ");
+        Serial.print(SERIAL_MSG_DESERIALIZE_FAILED);
         Serial.println(error.c_str());
+        Serial.print(F("ERROR CODE: "));
+        Serial.println(error.code());
       }
     } else {
-      Serial.println("HTTP GET failed, code: " + String(httpCode));
+      Serial.print(SERIAL_MSG_HTTP_GET_FAILED);
+      Serial.println(httpCode);
+      if(httpCode == -1) {
+        Serial.println(F("ERROR: CONNECTION FAILED (CHECK WIFI/URL)"));
+      } else if(httpCode == -11) {
+        Serial.println(F("ERROR: CONNECTION TIMEOUT"));
+      }
     }
 
     http.end();
+  } else {
+    Serial.println(F("WIFI NOT CONNECTED!"));
   }
+  
+  Serial.println(F("=== CALLING STATION SELECT ==="));
 
   // selected_station = station_abbr[one_station];
   stationSelect();
 
-
-  // payload[0] = '\0';
-
-
-
-  if (WiFi.status() == WL_CONNECTED) {
-    
+  // Main arrival display loop - continues until button press
+  bool returnToStationSelect = false;
+  
+  while(!returnToStationSelect && WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    http.begin("https://api.bart.gov/api/etd.aspx?cmd=etd&orig="+selected_station+"&key=QWMH-PE9Y-9WST-DWE9&json=y");
+    String etdUrl = String(BART_API_ETD_URL_BASE) + selected_station + "&key=" + BART_API_KEY + "&json=y";
+    Serial.print(F("FETCHING ARRIVAL DATA FROM: "));
+    Serial.println(etdUrl);
+    
+    http.begin(etdUrl);
+    http.setTimeout(10000);
     int httpCode = http.GET();
+    
+    Serial.print(F("HTTP GET CODE: "));
+    Serial.println(httpCode);
+    
     if (httpCode > 0) {
       String payload = http.getString();
-      // Serial.println("HTTP Response code: " + String(httpCode));
-      // Serial.println("Received JSON:");
-      // Serial.println(payload);
+      Serial.print(F("RECEIVED PAYLOAD (LENGTH "));
+      Serial.print(payload.length());
+      Serial.println(F("):"));
+      Serial.println(payload);
+      Serial.println(F("=== END PAYLOAD ==="));
 
       DynamicJsonDocument doc(JSON_DOC_SIZE);
       DeserializationError error = deserializeJson(doc, payload);
 
-      
-      JsonArray stations = doc["root"]["station"];
-      Serial.println("Created array");
-      for (JsonObject station : stations) {
-        // Serial.print("Name: ");
-        // Serial.println(station["name"].as<char *>());
-        JsonArray etds = station["etd"];
+      if (error) {
+        Serial.print(F("JSON DESERIALIZATION ERROR: "));
+        Serial.println(error.c_str());
+      } else {
+        Serial.println(F("JSON DESERIALIZATION SUCCESSFUL"));
         
-        uint8_t etd_index = 0;
-        gfx->setTextColor(RED, BLACK);
-        gfx->setRotation(3);
-
-        for (JsonObject etd : etds) {
-          String destination = (etd["destination"].as<char *>());
-          destination.toUpperCase();
-          Serial.print("Destination: ");
-          Serial.println(destination);
-          JsonArray estimates = etd["estimate"];
-          uint8_t timeMinutes[3] = {0};
-          uint8_t index = 0;
-          uint8_t car_length;
-          for (JsonObject estimate : estimates) {
-            String tmpMin = estimate["minutes"].as<char *>();
-            timeMinutes[index] = (uint8_t)(tmpMin.toInt());
-            String carLength = estimate["length"].as<char *>();
-            car_length = (uint8_t)(carLength.toInt());
-            // Serial.print("Minutes: ");
-            // Serial.println(timeMinutes[index]);    
-            index++;
-          }
-
-          if(etd_index % 2 == 0) {
-            gfx->fillScreen(BLACK);
-            delay(1000);
+        // Check for and display arriving trains (0-minute North-bound arrivals)
+        bool hasArrivingTrain = true;
+        while(hasArrivingTrain && !returnToStationSelect) {
+          hasArrivingTrain = false;
+          String arrivingDestination = "";
+          uint8_t arrivingCarLength = 0;
           
-            gfx->setCursor(10, 12);
-            // gfx->setCursor(10, 80); // 72 (sz8) + 8
-            gfx->setTextSize(LARGE_TXT);
-            
-            gfx->print(F(destination.substring(0, 11)));
-            
-            gfx->setCursor(570, 16); // 576 max to fit 9 characters // 12 + 4
-            // gfx->setCursor(600, 76); // 72 (sz8) + 8 - 4(.5)
-            gfx->setTextSize(SMALL_TXT);
-            if(timeMinutes[0] < 10){
-              gfx->print(F(" "));
+          JsonArray stations = doc["root"]["station"];
+          for (JsonObject station : stations) {
+            JsonArray etds = station["etd"];
+            for (JsonObject etd : etds) {
+              JsonArray estimates = etd["estimate"];
+              for (JsonObject estimate : estimates) {
+                String direction = estimate["direction"].as<String>();
+                if(direction == "North") {
+                  String tmpMin = estimate["minutes"].as<char *>();
+                  uint8_t minutes = (uint8_t)(tmpMin.toInt());
+                  if(minutes == 0) {
+                    hasArrivingTrain = true;
+                    arrivingDestination = etd["destination"].as<String>();
+                    String carLength = estimate["length"].as<char *>();
+                    arrivingCarLength = (uint8_t)(carLength.toInt());
+                    Serial.print(F("FOUND ARRIVING TRAIN: "));
+                    Serial.print(arrivingDestination);
+                    Serial.print(F(", "));
+                    Serial.print(arrivingCarLength);
+                    Serial.println(F(" CARS"));
+                    break;
+                  }
+                }
+              }
+              if(hasArrivingTrain) break;
             }
-            if(timeMinutes[1] < 10){
-              gfx->print(F(" "));
-            }
-            gfx->print(F(timeMinutes[0]));
-            gfx->print(F(","));
-            gfx->print(F(timeMinutes[1]));
-            gfx->print(F(" MIN"));
-
-            gfx->setCursor(10, 88); // 12 + 64 (sz8) + 12
-            // gfx->setCursor(10, 151); // 72 (sz8) + 8 + 63 (sz7) + 8
-            gfx->setTextSize(SMALL_TXT);
-
-            gfx->print(F(car_length));
-            gfx->print(F(" CAR TRAIN"));
+            if(hasArrivingTrain) break;
           }
-          else
-          {
-            gfx->setCursor(10, 172);
-            // gfx->setCursor(10, 240); // 160 + 72 (sz8) + 8
-            gfx->setTextSize(LARGE_TXT);
+          
+          if(hasArrivingTrain) {
+            // Display arriving train screen
+            displayArrivingTrain(arrivingDestination, arrivingCarLength);
             
-            gfx->print(F(destination.substring(0, 11))); 
+            // Display for 20 seconds with button check
+            unsigned long displayStart = millis();
+            int buttonPress = 0;
+            while((millis() - displayStart) < ARRIVING_DISPLAY_DELAY && buttonPress == 0) {
+              buttonPress = buttonPressed(100);  // Check for button every 100ms
+              if(buttonPress != 0) {
+                Serial.print(F("BUTTON PRESSED DURING ARRIVING DISPLAY: "));
+                Serial.println(buttonPress);
+                returnToStationSelect = true;
+                break;
+              }
+              delay(100);
+            }
             
-            gfx->setCursor(570, 176); // 576 max to fit 9 characters // 160 + 12 + 4
-            // gfx->setCursor(600, 236); // 160 + 72 (sz8) + 8 - 4(.5)
-            gfx->setTextSize(SMALL_TXT);
-            if(timeMinutes[0] < 10){
-              gfx->print(F(" "));
+            if(returnToStationSelect) break;
+            
+            // Fetch new data to check if train is still arriving
+            Serial.println(F("CHECKING FOR UPDATED ARRIVAL DATA..."));
+            http.end();
+            http.begin(etdUrl);
+            http.setTimeout(10000);
+            httpCode = http.GET();
+            
+            if (httpCode > 0) {
+              payload = http.getString();
+              DeserializationError newError = deserializeJson(doc, payload);
+              
+              if (newError) {
+                Serial.print(F("ERROR PARSING UPDATE: "));
+                Serial.println(newError.c_str());
+                hasArrivingTrain = false;  // Exit loop on error
+              }
+            } else {
+              Serial.print(F("HTTP GET FAILED FOR UPDATE: "));
+              Serial.println(httpCode);
+              hasArrivingTrain = false;  // Exit loop on error
             }
-            if(timeMinutes[1] < 10){
-              gfx->print(F(" "));
-            }
-            gfx->print(F(timeMinutes[0]));
-            gfx->print(F(","));
-            gfx->print(F(timeMinutes[1]));
-            gfx->print(F(" MIN"));
-
-            gfx->setCursor(10, 248); // 160 + 12 + 64 (sz8) + 12
-            // gfx->setCursor(10, 311);// 160 + 72 (sz8) + 8 + 63 (sz7) + 8
-            gfx->setTextSize(SMALL_TXT);
-
-            gfx->print(F(car_length));
-            gfx->print(F(" CAR TRAIN"));
-
-            delay(5000);
           }
-
-          etd_index++;
-
-          // gfx->print(F(timeMinutes[0]));
-          // if(sizeof(timeMinutes, 2)==1){
-          // if(timeMinutes[1]){
-          //   gfx->print(F(","));
-          //   gfx->print(F(timeMinutes[1]));
-          // }
-          // gfx->print(F(" MIN"));
-        }  
+        }
+        
+        if(returnToStationSelect) break;
+        
+        // Now proceed with normal arrival display
+        JsonArray stations = doc["root"]["station"];
+        Serial.print(F("NUMBER OF STATIONS IN RESPONSE: "));
+        Serial.println(stations.size());
+        
+        for (JsonObject station : stations) {
+          Serial.print(F("STATION NAME: "));
+          Serial.println(station["name"].as<char *>());
+          Serial.print(F("STATION ABBR: "));
+          Serial.println(station["abbr"].as<char *>());
+          
+          JsonArray etds = station["etd"];
+          Serial.print(F("TOTAL NUMBER OF DESTINATIONS (ETDs): "));
+          Serial.println(etds.size());
+          
+          // Filter ETDs to only include North-bound ones (excluding 0-minute arrivals)
+          // First pass: count North-bound ETDs with non-zero minutes
+          uint8_t northEtdCount = 0;
+          for (JsonObject etd : etds) {
+            JsonArray estimates = etd["estimate"];
+            bool hasNorthNonZero = false;
+            for (JsonObject estimate : estimates) {
+              String direction = estimate["direction"].as<String>();
+              if(direction == "North") {
+                String tmpMin = estimate["minutes"].as<char *>();
+                uint8_t minutes = (uint8_t)(tmpMin.toInt());
+                if(minutes > 0) {  // Only count non-zero minute North estimates
+                  hasNorthNonZero = true;
+                  break;
+                }
+              }
+            }
+            if(hasNorthNonZero) {
+              northEtdCount++;
+            }
+          }
+          
+          Serial.print(F("NUMBER OF NORTH-BOUND DESTINATIONS: "));
+          Serial.println(northEtdCount);
+          
+          if(northEtdCount == 0) {
+            Serial.println(F("NO NORTH-BOUND DESTINATIONS FOUND"));
+            // Display message and wait for button
+            gfx->fillScreen(BLACK);
+            gfx->setTextColor(RED, BLACK);
+            gfx->setRotation(DISPLAY_ROTATION);
+            gfx->setTextSize(STATION_NAME_TXT);
+            String noNorthMsg = "NO NORTH TRAINS";
+            int16_t x = getCenteredX(noNorthMsg, STATION_NAME_TXT);
+            int16_t y = (gfx->height() / 2) - ((CHAR_HEIGHT * STATION_NAME_TXT) / 2);
+            gfx->setCursor(x, y);
+            gfx->print(noNorthMsg);
+            
+            // Wait for button press or timeout
+            int buttonPress = buttonPressed(30000);
+            if(buttonPress != 0) {
+              returnToStationSelect = true;
+              break;
+            }
+            continue;
+          }
+          
+          gfx->setTextColor(RED, BLACK);
+          gfx->setRotation(DISPLAY_ROTATION);
+          
+          // Layout constants for arrival display
+          int16_t displayHeight = gfx->height();
+          int16_t stationTextHeight = CHAR_HEIGHT * ARRIVAL_STATION_TXT;
+          int16_t carTextHeight = CHAR_HEIGHT * ARRIVAL_CARS_TXT;
+          int16_t spaceBetweenStationAndCar = 8;  // Space between station name and car count
+          
+          // Calculate total content height
+          int16_t firstSectionHeight = stationTextHeight + spaceBetweenStationAndCar + carTextHeight;
+          int16_t secondSectionHeight = stationTextHeight + spaceBetweenStationAndCar + carTextHeight;
+          int16_t totalContentHeight = firstSectionHeight + secondSectionHeight;
+          
+          // Calculate available space for margins and spacing
+          int16_t availableSpace = displayHeight - totalContentHeight;
+          
+          // Distribute space: equal top/bottom margins, rest between sections
+          int16_t topBottomMargin = availableSpace / 3;  // Equal margins at top and bottom
+          int16_t spaceBetweenSections = availableSpace - (2 * topBottomMargin);  // Remaining space between sections
+          
+          // Calculate Y positions
+          int16_t stationY1 = topBottomMargin;  // First station Y position
+          int16_t firstCarY = stationY1 + stationTextHeight + spaceBetweenStationAndCar;
+          int16_t stationY2 = firstCarY + carTextHeight + spaceBetweenSections;  // Second station Y position
+          int16_t secondCarY = stationY2 + stationTextHeight + spaceBetweenStationAndCar;
+          
+          int16_t margin = ARRIVAL_MARGIN;  // Left margin
+          
+          // Process North-bound ETDs in pairs (excluding 0-minute arrivals)
+          uint8_t northEtdIndex = 0;
+          for (JsonObject etd : etds) {
+            // Check if this ETD has North-bound estimates with non-zero minutes
+            JsonArray estimates = etd["estimate"];
+            bool hasNorthNonZero = false;
+            for (JsonObject estimate : estimates) {
+              String direction = estimate["direction"].as<String>();
+              if(direction == "North") {
+                String tmpMin = estimate["minutes"].as<char *>();
+                uint8_t minutes = (uint8_t)(tmpMin.toInt());
+                if(minutes > 0) {  // Only process non-zero minute North estimates
+                  hasNorthNonZero = true;
+                  break;
+                }
+              }
+            }
+            
+            if(!hasNorthNonZero) {
+              continue;  // Skip non-North or 0-minute North ETDs
+            }
+            
+            // Only process pairs starting at even indices (0, 2, 4...)
+            // Or if it's the last one and total is odd, process it alone
+            if(northEtdIndex % 2 == 0 || (northEtdIndex == northEtdCount - 1 && northEtdCount % 2 == 1)) {
+              // Clear screen for new pair (or single if last and odd)
+              gfx->fillScreen(BLACK);
+              
+              // Process first ETD in pair
+              String destination = (etd["destination"].as<char *>());
+              destination.toUpperCase();
+              
+              Serial.print(F("  NORTH-BOUND DESTINATION "));
+              Serial.print(northEtdIndex);
+              Serial.print(F(": "));
+              Serial.println(destination);
+              
+              JsonArray estimates = etd["estimate"];
+              Serial.print(F("    NUMBER OF ESTIMATES: "));
+              Serial.println(estimates.size());
+              
+              // Get up to 2 time estimates (minutes only) from North-bound estimates and car length
+              uint8_t timeMinutes[2] = {0, 0};
+              uint8_t numTimes = 0;
+              uint8_t car_length = 0;
+              
+              // Collect up to 2 North-bound estimates
+              for (JsonObject estimate : estimates) {
+                if(numTimes >= 2) break;
+                
+                String direction = estimate["direction"].as<String>();
+                if(direction != "North") {
+                  continue;  // Skip non-North estimates
+                }
+                
+                String tmpMin = estimate["minutes"].as<char *>();
+                uint8_t minutes = (uint8_t)(tmpMin.toInt());
+                if(minutes == 0) {
+                  continue;  // Skip 0-minute estimates (handled by arriving screen)
+                }
+                
+                timeMinutes[numTimes] = minutes;
+                
+                // Get car length from first North estimate
+                if(numTimes == 0) {
+                  String carLength = estimate["length"].as<char *>();
+                  car_length = (uint8_t)(carLength.toInt());
+                }
+                
+                Serial.print(F("      NORTH ESTIMATE "));
+                Serial.print(numTimes);
+                Serial.print(F(": "));
+                Serial.print(timeMinutes[numTimes]);
+                Serial.print(F(" MIN"));
+                if(numTimes == 0) {
+                  Serial.print(F(", "));
+                  Serial.print(car_length);
+                  Serial.print(F(" CARS"));
+                }
+                Serial.println();
+                
+                numTimes++;
+              }
+              
+              // Sort times so smallest is first (simple bubble sort for 2 elements)
+              if(numTimes == 2 && timeMinutes[0] > timeMinutes[1]) {
+                uint8_t temp = timeMinutes[0];
+                timeMinutes[0] = timeMinutes[1];
+                timeMinutes[1] = temp;
+              }
+              
+              // Display first ETD in pair (or single if last and odd)
+              // Station name (size 8, left-aligned)
+              gfx->setTextSize(ARRIVAL_STATION_TXT);
+              gfx->setCursor(margin, stationY1);
+              String stationText = destination.substring(0, DESTINATION_MAX_LENGTH);
+              gfx->print(stationText);
+              
+              // Time (size 7, right-aligned, vertically centered with station)
+              String timeStr = "";
+              // Only add leading space for single time if < 10 (for right alignment)
+              // If two times, don't add spaces even if both are < 10
+              if(numTimes == 1 && timeMinutes[0] < 10) {
+                timeStr += " ";
+              }
+              timeStr += String(timeMinutes[0]);
+              if(numTimes > 1) {
+                timeStr += ",";
+                timeStr += String(timeMinutes[1]);
+              }
+              timeStr += " MIN";
+              
+              int16_t timeWidth = timeStr.length() * CHAR_WIDTH * ARRIVAL_TIME_TXT;
+              int16_t timeX = DISPLAY_WIDTH - margin - timeWidth;
+              int16_t timeTextHeight = CHAR_HEIGHT * ARRIVAL_TIME_TXT;
+              int16_t timeY = stationY1 + (stationTextHeight - timeTextHeight) / 2;
+              
+              gfx->setTextSize(ARRIVAL_TIME_TXT);
+              gfx->setCursor(timeX, timeY);
+              gfx->print(timeStr);
+              
+              // Car count (size 6, below station name)
+              gfx->setTextSize(ARRIVAL_CARS_TXT);
+              gfx->setCursor(margin, firstCarY);
+              gfx->print(car_length);
+              gfx->print(F(STR_CAR_TRAIN));
+              
+              // Check if there's a second North-bound ETD in this pair
+              if(northEtdIndex + 1 < northEtdCount) {
+                // Find next North-bound ETD
+                uint8_t nextNorthIndex = 0;
+                JsonObject nextEtd;
+                bool foundNext = false;
+                
+                for (JsonObject checkEtd : etds) {
+                  JsonArray checkEstimates = checkEtd["estimate"];
+                  bool hasNorth = false;
+                  for (JsonObject estimate : checkEstimates) {
+                    String direction = estimate["direction"].as<String>();
+                    if(direction == "North") {
+                      hasNorth = true;
+                      break;
+                    }
+                  }
+                  
+                  if(hasNorth) {
+                    if(nextNorthIndex == northEtdIndex + 1) {
+                      nextEtd = checkEtd;
+                      foundNext = true;
+                      break;
+                    }
+                    nextNorthIndex++;
+                  }
+                }
+                
+                if(foundNext) {
+                  // Process second ETD in pair
+                  String nextDestination = (nextEtd["destination"].as<char *>());
+                  nextDestination.toUpperCase();
+                  
+                  Serial.print(F("  NORTH-BOUND DESTINATION "));
+                  Serial.print(northEtdIndex + 1);
+                  Serial.print(F(": "));
+                  Serial.println(nextDestination);
+                  
+                  JsonArray nextEstimates = nextEtd["estimate"];
+                  Serial.print(F("    NUMBER OF ESTIMATES: "));
+                  Serial.println(nextEstimates.size());
+                  
+                  // Get up to 2 time estimates for second ETD (North-bound only)
+                  uint8_t nextTimeMinutes[2] = {0, 0};
+                  uint8_t nextNumTimes = 0;
+                  uint8_t nextCarLength = 0;
+                  
+                  for (JsonObject estimate : nextEstimates) {
+                    if(nextNumTimes >= 2) break;
+                    
+                    String direction = estimate["direction"].as<String>();
+                    if(direction != "North") {
+                      continue;  // Skip non-North estimates
+                    }
+                    
+                    String tmpMin = estimate["minutes"].as<char *>();
+                    uint8_t minutes = (uint8_t)(tmpMin.toInt());
+                    if(minutes == 0) {
+                      continue;  // Skip 0-minute estimates (handled by arriving screen)
+                    }
+                    
+                    nextTimeMinutes[nextNumTimes] = minutes;
+                    
+                    if(nextNumTimes == 0) {
+                      String carLength = estimate["length"].as<char *>();
+                      nextCarLength = (uint8_t)(carLength.toInt());
+                    }
+                    
+                    Serial.print(F("      NORTH ESTIMATE "));
+                    Serial.print(nextNumTimes);
+                    Serial.print(F(": "));
+                    Serial.print(nextTimeMinutes[nextNumTimes]);
+                    Serial.print(F(" MIN"));
+                    if(nextNumTimes == 0) {
+                      Serial.print(F(", "));
+                      Serial.print(nextCarLength);
+                      Serial.print(F(" CARS"));
+                    }
+                    Serial.println();
+                    
+                    nextNumTimes++;
+                  }
+                  
+                  // Sort times
+                  if(nextNumTimes == 2 && nextTimeMinutes[0] > nextTimeMinutes[1]) {
+                    uint8_t temp = nextTimeMinutes[0];
+                    nextTimeMinutes[0] = nextTimeMinutes[1];
+                    nextTimeMinutes[1] = temp;
+                  }
+                  
+                  // Display second ETD in pair
+                  // Station name (size 8, left-aligned)
+                  gfx->setTextSize(ARRIVAL_STATION_TXT);
+                  gfx->setCursor(margin, stationY2);
+                  String nextStationText = nextDestination.substring(0, DESTINATION_MAX_LENGTH);
+                  gfx->print(nextStationText);
+                  
+                  // Time (size 7, right-aligned, vertically centered with station)
+                  String nextTimeStr = "";
+                  // Only add leading space for single time if < 10 (for right alignment)
+                  // If two times, don't add spaces even if both are < 10
+                  if(nextNumTimes == 1 && nextTimeMinutes[0] < 10) {
+                    nextTimeStr += " ";
+                  }
+                  nextTimeStr += String(nextTimeMinutes[0]);
+                  if(nextNumTimes > 1) {
+                    nextTimeStr += ",";
+                    nextTimeStr += String(nextTimeMinutes[1]);
+                  }
+                  nextTimeStr += " MIN";
+                  
+                  int16_t nextTimeWidth = nextTimeStr.length() * CHAR_WIDTH * ARRIVAL_TIME_TXT;
+                  int16_t nextTimeX = DISPLAY_WIDTH - margin - nextTimeWidth;
+                  int16_t nextTimeY = stationY2 + (stationTextHeight - timeTextHeight) / 2;
+                  
+                  gfx->setTextSize(ARRIVAL_TIME_TXT);
+                  gfx->setCursor(nextTimeX, nextTimeY);
+                  gfx->print(nextTimeStr);
+                  
+                  // Car count (size 6, below station name)
+                  gfx->setTextSize(ARRIVAL_CARS_TXT);
+                  gfx->setCursor(margin, secondCarY);
+                  gfx->print(nextCarLength);
+                  gfx->print(F(STR_CAR_TRAIN));
+                }
+              }
+              
+              // Display delay with button check
+              unsigned long displayStart = millis();
+              int buttonPress = 0;
+              while((millis() - displayStart) < ARRIVAL_DISPLAY_DELAY && buttonPress == 0) {
+                buttonPress = buttonPressed(100);  // Check for button every 100ms
+                if(buttonPress != 0) {
+                  Serial.print(F("BUTTON PRESSED DURING DISPLAY: "));
+                  Serial.println(buttonPress);
+                  returnToStationSelect = true;
+                  break;
+                }
+                delay(100);
+              }
+              
+              if(returnToStationSelect) break;
+              
+              // Blank screen between sets (except after last set) with button check
+              if(northEtdIndex + 2 < northEtdCount) {
+                gfx->fillScreen(BLACK);
+                unsigned long blankStart = millis();
+                buttonPress = 0;
+                while((millis() - blankStart) < ARRIVAL_BLANK_DELAY && buttonPress == 0) {
+                  buttonPress = buttonPressed(50);  // Check for button every 50ms
+                  if(buttonPress != 0) {
+                    Serial.print(F("BUTTON PRESSED DURING BLANK: "));
+                    Serial.println(buttonPress);
+                    returnToStationSelect = true;
+                    break;
+                  }
+                  delay(50);
+                }
+                if(returnToStationSelect) break;
+              }
+            }
+            
+            northEtdIndex++;
+          }
+          
+          // After displaying all North-bound ETDs, check for button before fetching new data
+          if(!returnToStationSelect) {
+            Serial.println(F("ALL NORTH-BOUND ARRIVALS DISPLAYED, CHECKING FOR BUTTON BEFORE REFRESH"));
+            int buttonPress = buttonPressed(1000);  // Brief check for button
+            if(buttonPress != 0) {
+              Serial.print(F("BUTTON PRESSED BEFORE REFRESH: "));
+              Serial.println(buttonPress);
+              returnToStationSelect = true;
+            }
+          }
+        }
       }
+    } else {
+      Serial.print(F("HTTP GET FAILED, CODE: "));
+      Serial.println(httpCode);
     }
+    
+    http.end();
+    
+    if(returnToStationSelect) {
+      Serial.println(F("RETURNING TO STATION SELECTION"));
+      break;
+    }
+    
+    // Small delay before fetching new data
+    delay(500);
   }
 
 
